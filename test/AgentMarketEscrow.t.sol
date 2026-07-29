@@ -202,4 +202,51 @@ contract AgentMarketEscrowTest is Test {
         assertTrue(attacker.reentryBlocked(), "reentrant buy must be blocked by the guard");
         assertEq(nft.ownerOf(TOKEN), address(attacker), "NFT delivered to buyer");
     }
+
+    function test_setFeeBps_ownerOnly_andCapped() public {
+        escrow.setFeeBps(500);
+        assertEq(escrow.feeBps(), 500);
+        vm.prank(buyer);
+        vm.expectRevert(AgentMarketEscrow.NotOwner.selector);
+        escrow.setFeeBps(100);
+        vm.expectRevert(AgentMarketEscrow.FeeTooHigh.selector);
+        escrow.setFeeBps(1001);
+    }
+
+    function test_feeChange_appliesToNextSale() public {
+        escrow.setFeeBps(1000); // 10%
+        uint256 id = _list();
+        uint256 sellerBefore = seller.balance;
+        uint256 treasBefore = treasury.balance;
+        vm.prank(buyer);
+        escrow.buy{value: PRICE}(id);
+        uint256 fee = (PRICE * 1000) / 10_000;
+        assertEq(treasury.balance - treasBefore, fee);
+        assertEq(seller.balance - sellerBefore, PRICE - fee);
+    }
+
+    function test_setTreasury_ownerOnly() public {
+        escrow.setTreasury(address(0xBEEF));
+        assertEq(escrow.treasury(), address(0xBEEF));
+        vm.prank(buyer);
+        vm.expectRevert(AgentMarketEscrow.NotOwner.selector);
+        escrow.setTreasury(buyer);
+        vm.expectRevert(AgentMarketEscrow.ZeroAddress.selector);
+        escrow.setTreasury(address(0));
+    }
+
+    function test_transferOwnership() public {
+        escrow.transferOwnership(buyer);
+        assertEq(escrow.owner(), buyer);
+        vm.expectRevert(AgentMarketEscrow.NotOwner.selector);
+        escrow.setFeeBps(100);
+        vm.prank(buyer);
+        escrow.setFeeBps(100);
+        assertEq(escrow.feeBps(), 100);
+    }
+
+    function test_constructor_zeroTreasury_reverts() public {
+        vm.expectRevert(AgentMarketEscrow.ZeroAddress.selector);
+        new AgentMarketEscrow(address(0), 250);
+    }
 }

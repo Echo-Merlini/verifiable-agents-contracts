@@ -32,10 +32,12 @@ contract AgentMarketEscrow {
         bool active;
     }
 
-    /// @notice protocol fee recipient (immutable).
-    address public immutable treasury;
-    /// @notice protocol fee in basis points, capped at 10% (immutable).
-    uint96 public immutable feeBps;
+    /// @notice contract owner — can tune the protocol fee + treasury.
+    address public owner;
+    /// @notice protocol fee recipient.
+    address public treasury;
+    /// @notice protocol fee in basis points, capped at 10% (1000).
+    uint96 public feeBps;
 
     uint256 public nextId = 1;
     mapping(uint256 => Listing) public listings;
@@ -54,6 +56,9 @@ contract AgentMarketEscrow {
         uint256 fee
     );
     event Cancelled(uint256 indexed id);
+    event FeeChanged(uint96 oldBps, uint96 newBps);
+    event TreasuryChanged(address indexed oldTreasury, address indexed newTreasury);
+    event OwnershipTransferred(address indexed oldOwner, address indexed newOwner);
 
     error NotSeller();
     error NotActive();
@@ -62,6 +67,8 @@ contract AgentMarketEscrow {
     error FeeTooHigh();
     error PayFailed();
     error Reentrancy();
+    error NotOwner();
+    error ZeroAddress();
 
     modifier nonReentrant() {
         if (_lock != 1) revert Reentrancy();
@@ -70,10 +77,40 @@ contract AgentMarketEscrow {
         _lock = 1;
     }
 
+    modifier onlyOwner() {
+        if (msg.sender != owner) revert NotOwner();
+        _;
+    }
+
     constructor(address _treasury, uint96 _feeBps) {
         if (_feeBps > 1000) revert FeeTooHigh();
+        if (_treasury == address(0)) revert ZeroAddress();
+        owner = msg.sender;
         treasury = _treasury;
         feeBps = _feeBps;
+    }
+
+    // ── owner controls ──────────────────────────────────────────────────────────
+    /// @notice Set the protocol fee (basis points, ≤ 10%). Applies to future sales; the fee actually
+    ///         taken is always emitted in each `Sold` event, so it stays transparent/recomputable.
+    function setFeeBps(uint96 newBps) external onlyOwner {
+        if (newBps > 1000) revert FeeTooHigh();
+        emit FeeChanged(feeBps, newBps);
+        feeBps = newBps;
+    }
+
+    /// @notice Set the protocol fee recipient.
+    function setTreasury(address newTreasury) external onlyOwner {
+        if (newTreasury == address(0)) revert ZeroAddress();
+        emit TreasuryChanged(treasury, newTreasury);
+        treasury = newTreasury;
+    }
+
+    /// @notice Transfer ownership of the fee controls.
+    function transferOwnership(address newOwner) external onlyOwner {
+        if (newOwner == address(0)) revert ZeroAddress();
+        emit OwnershipTransferred(owner, newOwner);
+        owner = newOwner;
     }
 
     /// @notice List an agent NFT for sale. The caller must have approved this escrow for the token
